@@ -1,0 +1,615 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Cloudformation template to create required infrastructure resources for AWS Glue Analytics.
+Parameters:
+
+  ProjectName:
+    Description: Name of Project/Application in lower case.
+    Type: String
+    Default: demo
+
+  EnvironmentType:
+    Description: Type of Environment in lower case.
+    Type: String
+    Default: dev
+
+  NotifyEmail:
+    Description: Email Address
+    Type: String
+    Default: bprajapati@deloitte.com 
+
+Resources:
+
+  GlueAnalyticsAppRawDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${ProjectName}-${EnvironmentType}-db-raw"
+          #Fn::Transform:
+          #- Name: 'String'
+          #  Parameters:
+          #    InputString: !Sub "${ProjectName}-${EnvironmentType}-db-raw"
+          #    Operation: Lower
+        Description: !Sub "App: ${ProjectName}-${EnvironmentType}-RAW-Database"
+
+  GlueAnalyticsAppCurratedDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${ProjectName}-${EnvironmentType}-db-currated"
+          #Fn::Transform:
+          #- Name: 'String'
+          #  Parameters:
+          #    InputString: !Sub "${ProjectName}-${EnvironmentType}-db-currated"
+          #    Operation: Lower
+        Description: !Sub "App: ${ProjectName}-${EnvironmentType}-CURATED-Database"
+
+  GlueAnalyticsAppDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${ProjectName}-${EnvironmentType}-db"
+          #Fn::Transform:
+          #- Name: 'String'
+          #  Parameters:
+          #    InputString: !Sub "${ProjectName}-${EnvironmentType}-db"
+          #    Operation: Lower
+        Description: !Sub "App: ${ProjectName}-${EnvironmentType}-FINAL-Database"
+ 
+  GlueAnalyticsCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-raw"
+      Role:
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      DatabaseName: !Ref GlueAnalyticsAppRawDatabase
+      Targets:
+        S3Targets:
+          - Path:
+              Fn::Sub:
+              - "s3://${BucketName}/json"
+              - BucketName:
+                  Fn::ImportValue:
+                    !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  PersonRawJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-person-raw"
+      Role: 
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      GlueVersion: "2.0" 
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:
+          Fn::Sub:
+            - "s3://${BucketName}/glue/scripts/person_raw.py"
+            - BucketName:
+                Fn::ImportValue:
+                  !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 0
+      NumberOfWorkers: 2
+      WorkerType: G.2X
+
+  PersonConfJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-person-conf"
+      Role:
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      GlueVersion: "2.0" 
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:
+          Fn::Sub:
+            - "s3://${BucketName}/glue/scripts/person_conf.py"
+            - BucketName:
+                Fn::ImportValue:
+                  !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 0
+      NumberOfWorkers: 2
+      WorkerType: G.2X
+
+  AddressRawJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-address-raw"
+      Role:
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      GlueVersion: "2.0" 
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:
+          Fn::Sub:
+            - "s3://${BucketName}/glue/scripts/address_raw.py"
+            - BucketName:
+                Fn::ImportValue:
+                  !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 0
+      NumberOfWorkers: 2
+      WorkerType: G.2X
+
+  AddressConfJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-address-conf"
+      Role:
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      GlueVersion: "2.0" 
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:
+          Fn::Sub:
+            - "s3://${BucketName}/glue/scripts/address_conf.py"
+            - BucketName:
+                Fn::ImportValue:
+                  !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 0
+      NumberOfWorkers: 2
+      WorkerType: G.2X
+
+
+  AddressPersonMpgRawJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-address-person-mpg-raw"
+      Role:
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      GlueVersion: "2.0" 
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:
+          Fn::Sub:
+            - "s3://${BucketName}/glue/scripts/address_person_mpg_raw.py"
+            - BucketName:
+                Fn::ImportValue:
+                  !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 0
+      NumberOfWorkers: 2
+      WorkerType: G.2X
+
+  AddressPersonMpgConfJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentType}-address-person-mpg-conf"
+      Role:
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-AnalyticsGlueServiceRole"
+      GlueVersion: "2.0" 
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation:
+          Fn::Sub:
+            - "s3://${BucketName}/glue/scripts/address_person_mpg_conf.py"
+            - BucketName:
+                Fn::ImportValue:
+                  !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxRetries: 0
+      NumberOfWorkers: 2
+      WorkerType: G.2X
+
+
+  StepFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  AnalyticsStepFunction:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${ProjectName}-${EnvironmentType}-Glue-Analytics"
+      RoleArn: 
+        Fn::ImportValue:
+          !Sub "${EnvironmentType}-StepFunctionExecutionRole"
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StepFunctionLogGroup.Arn
+      DefinitionString: |-
+        {
+          "Comment": "Analytics-Step-Function",
+          "StartAt": "Preparing Job Data",
+          "States": {
+              "Preparing Job Data" : {
+                  "Type": "Pass",
+                  "Result": {
+                    "analytics_job_details": {
+                      "name": "AWS-Glue-Analytics",
+                      "envType" : "${EnvironmentType}",
+                      "projectName" : "${ProjectName}",
+                      "etl_jobs": {
+                          "1" : "${ProjectName}-${EnvironmentType}-person-raw",
+                          "2" : "${ProjectName}-${EnvironmentType}-person-conf",
+                          "3" : "${ProjectName}-${EnvironmentType}-address-raw",
+                          "4" : "${ProjectName}-${EnvironmentType}-address-conf",
+                          "5" : "${ProjectName}-${EnvironmentType}-address-person-mpg-raw",
+                          "6" : "${ProjectName}-${EnvironmentType}-address-person-mpg-conf"
+                      },
+                      "crawlerName": "${GlueAnalyticsCrawler}",
+                      "buckets": {
+                          "raw_bucket": "${SourceBucket}",
+                          "curr_bucket": "${SourceBucket}",
+                          "conf_bucket": "${SourceBucket}",
+                          "archive_bucket": "${SourceBucket}"
+                      },
+                      "databases": {
+                          "raw_database": "${GlueAnalyticsAppRawDatabase}",
+                          "curated_database": "${GlueAnalyticsAppCurratedDatabase}",
+                          "confirmed_database": "${GlueAnalyticsAppDatabase}"
+                      },
+                      "iterator": {
+                          "count": 6,
+                          "index": 0,
+                          "step": 1
+                      }
+                    }
+                  },
+                  "Next": "ETL Job has been initialized successfully"
+              },
+              "ETL Job has been initialized successfully": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "ResultPath": null,
+                  "Parameters": {
+                    "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                    "MessageGroupId": "ETL-Job-has-been-Initialized",
+                    "MessageBody.$": "$"
+                  },
+                  "Next": "Perform CSV to JSON"
+              },
+              "Perform CSV to JSON": {
+                    "Type" : "Task",
+                    "Resource" : "${CsvToJson}",
+                    "Next": "CSV to JSON Completed Successfully",
+                    "Catch": [
+                       {
+                            "ErrorEquals": [ "CsvToJsonFailedException" ],
+                            "Next": "CSV to JSON Failed"
+                       },
+                       {
+                            "ErrorEquals": [ "CSVToJsonFilesNotFoundException" ],
+                            "Next": "File Not Found"
+                       }
+                     ]
+                },
+                "CSV to JSON Completed Successfully" : {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::sqs:sendMessage",
+                    "ResultPath": null,
+                    "Parameters": {
+                      "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                      "MessageGroupId": "CSV-to-JSON-Completed",
+                      "MessageBody.$": "$" 
+                    },
+                    "Next": "Invoke Crawler"
+                },
+                "CSV to JSON Failed" : {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::sqs:sendMessage",
+                    "ResultPath": null,
+                    "Parameters": {
+                      "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                      "MessageGroupId": "CSV-to-JSON-Failed",
+                      "MessageBody.$": "$" 
+                    },
+                    "Next": "FAILED"
+                },
+              "Invoke Crawler": {
+                  "Type" : "Task",
+                  "Resource" : "${InvokeAnalyticsCrawler}",
+                  "TimeoutSeconds": 30,
+                  "HeartbeatSeconds": 5,
+                  "Retry": [
+                    {
+                      "ErrorEquals": ["CrawlerRunningException"],
+                      "IntervalSeconds" : 7,
+                      "BackoffRate" : 5,
+                      "MaxAttempts" : 80
+                    }
+                  ],
+                  "Catch": [
+                     {
+                          "ErrorEquals": [ "Exception" ],
+                          "Next": "Crawler Failed"
+                     }
+                   ],
+                  "Next": "Crawler Started"
+              },
+              "Crawler Failed": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "ResultPath": null,
+                  "Parameters": {
+                    "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                    "MessageGroupId": "Crawler-Failed",
+                    "MessageBody.$": "$"
+                  },
+                  "Next": "FAILED"
+              },
+              "Crawler Started": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "ResultPath": null,
+                  "Parameters": {
+                    "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                    "MessageGroupId": "Crawler-Started",
+                    "MessageBody.$": "$"
+                  },
+                  "Next": "Wait for Crawler to Complete"
+              },
+              "Wait for Crawler to Complete": {
+                  "Type": "Wait",
+                  "Seconds": 60,
+                  "Next": "Check status of Crawler"
+              },
+              "Check status of Crawler": {
+                  "Type": "Task",
+                  "TimeoutSeconds": 30,
+                  "HeartbeatSeconds": 5,
+                  "Resource": "${CheckStatusOfAnalyticsCrawler}",
+                  "Retry": [
+                      {
+                        "ErrorEquals": [ "CrawlerException" ],
+                        "IntervalSeconds": 7,
+                        "BackoffRate": 5,
+                        "MaxAttempts": 80
+                      },
+                      {
+                        "ErrorEquals": [ "States.All" ],
+                        "IntervalSeconds": 7,
+                        "BackoffRate": 5,
+                        "MaxAttempts": 80
+                      }
+                    ],
+                  "Catch": [
+                      {
+                        "ErrorEquals": [ "CrawlerException" ],
+                        "Next": "Crawler Failed"
+                      },
+                      {
+                        "ErrorEquals": [ "States.ALL" ],
+                        "Next": "Crawler Failed"
+                      }
+                    ],
+                  "Next": "Crawler Completed Successfully"
+              },
+              "Crawler Completed Successfully": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::sqs:sendMessage",
+                "ResultPath": null,
+                "Parameters": {
+                  "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                  "MessageGroupId": "Crawler-Completed",
+                  "MessageBody.$": "$"
+                },
+                "Next": "Initilize ETL Job"
+              },
+              "Initilize ETL Job": {
+                  "Type": "Pass",
+                  "Result": "1",
+                  "ResultPath": "$.order",
+                  "Next": "Invoke ETL Job"
+              },
+              "Invoke ETL Job": {
+                  "Type" : "Task",
+                  "Resource" : "${InvokeETLJob}",
+                  "TimeoutSeconds": 30,
+                  "HeartbeatSeconds": 5,
+                  "Catch": [
+                     {
+                          "ErrorEquals": [ "States.ALL" ],
+                          "Next": "ETL Job Failed"
+                     }
+                   ],
+                  "Next": "ETL Job Started"
+              },
+              "ETL Job Failed": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "ResultPath": null,
+                  "Parameters": {
+                    "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                    "MessageGroupId": "ETL-Job-Failed",
+                    "MessageBody.$": "$"
+                  },
+                  "Next": "Notify Failure"
+              },
+              "Notify Failure": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::sns:publish",
+                    "Parameters": {
+                      "Message" :  "One or more ETL Jobs are failed. For detail error messages and logs visit Step Function/CloudWatch console !",
+                      "Subject" :  "AWS Glue Analytics (Failed)",
+                      "TopicArn": "${AnalyticsSNSTopic}"
+                    },
+                    "Next": "FAILED"
+                 },
+              "ETL Job Started": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "ResultPath": null,
+                  "Parameters": {
+                    "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                    "MessageGroupId": "ETL-Job-Started",
+                    "MessageBody.$": "$"
+                  },
+                  "Next": "Wait for ETL Job to Complete"
+              },
+              "Wait for ETL Job to Complete": {
+                  "Type": "Wait",
+                  "Seconds": 60,
+                  "Next": "Check Status of ETL Job"
+              },
+              "Check Status of ETL Job": {
+                  "Type": "Task",
+                  "Resource": "${CheckStatusOfETLJob}",
+                  "ResultPath" : "$.JobRunId",
+                  "TimeoutSeconds": 30,
+                  "HeartbeatSeconds": 5,
+                  "Retry": [
+                      {
+                        "ErrorEquals": [ "ETLJobRunningException" ],
+                        "IntervalSeconds": 7,
+                        "BackoffRate": 5,
+                        "MaxAttempts": 80
+                      }
+                    ],
+                  "Catch": [
+                      {
+                        "ErrorEquals": [ "ETLJobFailedException" ],
+                        "Next": "ETL Job Failed"
+                      },
+                      {
+                        "ErrorEquals": [ "Exception" ],
+                        "Next": "ETL Job Failed"
+                      }
+                    ],
+                  "Next": "Need to Run another Job?"
+              },
+              "Need to Run another Job?": {
+                  "Type" : "Task",
+                  "Resource" : "${Iterator}",
+                  "TimeoutSeconds": 30,
+                  "HeartbeatSeconds": 5,
+                  "Next": "Run Pending Jobs",
+                  "Catch": [
+                      {
+                          "ErrorEquals": [ "IteratorException" ],
+                          "Next": "FAILED"
+                      }
+                  ]
+              },
+              "Run Pending Jobs": {
+                  "Type": "Choice",
+                  "Choices": [
+                      {
+                          "Variable": "$.analytics_job_details.iterator.continueRun",
+                          "BooleanEquals": true,
+                          "Next": "Invoke ETL Job"
+                      },
+                      {
+                          "Variable": "$.analytics_job_details.iterator.continueRun",
+                          "BooleanEquals": false,
+                          "Next": "ETL Jobs Completed"
+                      }
+                  ]
+              },
+              "ETL Jobs Completed": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "ResultPath": null,
+                  "Parameters": {
+                    "QueueUrl": "${StepFunctionLogETLEventsQueue}",
+                    "MessageGroupId": "ETL-Jobs-Completed",
+                    "MessageBody.$": "$" 
+                  },
+                  "Next": "Notify"
+                },
+                "File Not Found": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::sns:publish",
+                    "Parameters": {
+                      "Message" :  "No Files Found to prepare data for Analytics !",
+                      "Subject" :  "AWS Glue Analytics (File Not Found)",
+                      "TopicArn": "${AnalyticsSNSTopic}"
+                    },
+                    "Next": "SUCCESSFULL"
+                },
+              "Notify": {
+                  "Type": "Task",
+                    "Resource": "arn:aws:states:::sns:publish",
+                    "Parameters": {
+                      "Message" :  "All ETL Jobs are completed successfully !",
+                      "Subject" :  "AWS Glue Analytics (Success)",
+                      "TopicArn": "${AnalyticsSNSTopic}"
+                    },
+                    "Next": "SUCCESSFULL"
+              },
+              "FAILED": {
+                  "Type": "Fail"
+              },
+              "SUCCESSFULL": {
+                  "Type": "Succeed"
+              }
+          }
+        }
+      DefinitionSubstitutions:
+        EnvironmentType: !Ref EnvironmentType
+        ProjectName: !Ref ProjectName
+        GlueAnalyticsCrawler: !Ref GlueAnalyticsCrawler
+        GlueAnalyticsAppRawDatabase:  !Ref GlueAnalyticsAppRawDatabase
+        GlueAnalyticsAppCurratedDatabase: !Ref GlueAnalyticsAppCurratedDatabase
+        GlueAnalyticsAppDatabase: !Ref GlueAnalyticsAppDatabase
+        CsvToJson: 
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-CsvToJsonLF"
+        InvokeETLJob:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-InvokeETLJobLF"
+        InvokeAnalyticsCrawler:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-InvokeAnalyticsCrawlerLF"
+        AnalyticsSNSTopic:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-AnalyticsSNSTopic"
+        CheckStatusOfAnalyticsCrawler:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-CheckStatusOfAnalyticsCrawlerLF"
+        CheckStatusOfETLJob:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-CheckStatusOfETLJobLF"
+        Iterator:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-IteratorLF"
+        StepFunctionLogETLEventsQueue:
+          Fn::ImportValue:
+            !Sub "${EnvironmentType}-StepFunctionLogETLEventsQueue"
+        SourceBucket:
+          Fn::ImportValue:
+            !Sub "${ProjectName}-${EnvironmentType}-SourceBucket"
+
+

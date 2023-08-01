@@ -1,0 +1,29 @@
+# ETL Automation using Step Functions & AWS Glue #
+Creating Analytics application using AWS Glue and end to end workflow automation using AWS Step Functions.
+
+#### Run below command to upload Glue ETL Job Scripts & Test CSV files.
+
+```bash
+cd copy-to-s3
+aws --profile brijesh s3 sync . s3://glue-analytics-common-sourcebucket-rsqkpj8nhk7t/
+
+```  
+
+### Run below commands or cf\test-common.bat, cf\test-analytics.bat file to create SAM template file for CloudFormation deployments
+
+```bash
+
+aws cloudformation package --template-file common.yaml          --output-template-file  common-deploy.yaml    --s3-bucket    myworking-bucket  --profile brijesh --region us-east-2
+aws cloudformation deploy  --template-file common-deploy.yaml   --stack-name            Glue-Analytics-Common --capabilities CAPABILITY_IAM  --profile brijesh --region us-east-2
+
+aws cloudformation package --template-file analytics.yaml          --output-template-file  analytics-deploy.yaml  --s3-bucket myworking-bucket     --profile brijesh --region us-east-2
+aws cloudformation deploy  --template-file analytics-deploy.yaml   --stack-name            Glue-Analytics         --capabilities CAPABILITY_IAM  --profile brijesh --region us-east-2
+
+```  
+
+#### Go to AWS console, search for Step functions, select XXX-Glue-Analytics and click on Start Execution
+
+
+#### Notes:
+- If we run the Crawler with only one file with single folder, it is not doing crawlering better way, instead it just creates single table with name 'json' only.
+- When we have multiple folders with files, then it is able to create tables with proper table names. It will use folder names as table names.

@@ -1,0 +1,90 @@
+- As AWS Lambda has no support for native libararies, we need to install required libraries for
+  SQL Server manually and then need to upload in Lambda so that it can be reused for all lambdas
+  which has same dependencies.
+
+- Install Docker in your local computer.
+
+- Run below commands once Docker is up and running:
+
+  cd  c:/aws/sqlserver/src
+
+  docker run -it --entrypoint bash -v src:/host -e ODBCINI=/opt/odbc.ini -e ODBCSYSINI=/opt/ lambci/lambda:build-python3.7
+
+  # Download unixODBC
+  curl -s ftp://ftp.unixodbc.org/pub/unixODBC/unixODBC-2.3.7.tar.gz -O
+
+  # Install
+  tar xzvf unixODBC-2.3.7.tar.gz
+
+  cd unixODBC-2.3.7
+  ./configure \
+    --sysconfdir=/opt \
+    --disable-gui \
+    --disable-drivers \
+    --enable-iconv \
+    --with-iconv-char-enc=UTF8 \
+    --with-iconv-ucode-enc=UTF16LE \
+    --prefix=/opt
+
+  make
+  make install
+
+  # Cleanup
+  cd ..
+  rm -rf unixODBC-2.3.7 unixODBC-2.3.7.tar.gz
+
+
+  # Download
+  curl -s https://packages.microsoft.com/config/rhel/6/prod.repo > /etc/yum.repos.d/mssql-release.repo
+
+  # Install
+  yum -y install e2fsprogs.x86_64 0:1.43.5-2.43.amzn1 fuse-libs.x86_64 0:2.9.4-1.18.amzn1 libss.x86_64 0:1.43.5-2.43.amzn1
+  ACCEPT_EULA=Y yum -y install msodbcsql17 --disablerepo=amzn*
+  export CFLAGS="-I/opt/include"
+  export LDFLAGS="-L/opt/lib"
+
+  # Move the driver to the correct location
+  cd /opt
+  cp -r /opt/microsoft/msodbcsql17/ .
+
+  # Cleanup
+  rm -rf /opt/microsoft/
+
+  mkdir /opt/python/
+  cd /opt/python/
+  pip install pyodbc -t .
+
+  cd /opt
+  cat <<EOF > odbc.ini
+  [ODBC Driver 17 for SQL Server]
+  Driver = ODBC Driver 17 for SQL Server
+  Description = My ODBC Driver 17 for SQL Server
+  Trace = No
+  EOF
+
+  cat <<EOF > odbcinst.ini
+  [ODBC Driver 17 for SQL Server]
+  Description=Microsoft ODBC Driver 17 for SQL Server
+  Driver=/opt/msodbcsql17/lib64/libmsodbcsql-17.6.so.1.1
+  UsageCount=1
+  EOF
+
+  cd /opt
+  zip -r9 pyodbc-layer.zip .
+
+- Open other command prompt and copy this zip file to local computer
+
+  docker ps -a
+  docker cp dc90b4d86d88:/opt/pyodbc-layer.zip .
+
+- Create a Layer in AWS Lambda for future use
+
+  aws lambda publish-layer-version --layer-name pyodbc-layer --description "pyodbc package" --zip-file fileb://pyodbc-layer.zip --compatible-runtimes "python3.7" --profile yourawsprofilename
+
+- Update lambda configuration to use this layer
+
+  aws lambda update-function-configuration --function-name my-function --layers <ARN of pyodbc-layer>
+
+
+- Reference:
+  https://medium.com/@narayan.anurag/breaking-the-ice-between-aws-lambda-pyodbc-6f53d5e2bd26

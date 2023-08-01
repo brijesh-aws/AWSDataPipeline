@@ -1,0 +1,705 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  ProjectName:
+    Description: Name of Project/Application. (In lower case)
+    Type: String
+    Default: demo
+  EnvironmentType:
+    Description: Type of Environment (In lower case)
+    Type: String
+    Default: dev
+  NotifyEmail:
+    Description: Email Address
+    Type: String
+    Default: bprajapati@deloitte.com
+  SubnetId1:
+    Description: VPC Subnet 1
+    Type: String
+    Default: subnet-fc8a30a3
+  SubnetId2:
+    Description: VPC Subnet 2
+    Type: String
+    Default: subnet-f089c0bd
+  SecurityGroup1:
+    Description: Security Group 1
+    Type: String
+    Default: sg-8763d2b5
+  JobQueueName:
+    Description: Name of AWS Batch Job Queue
+    Type: String
+    Default: AnalyticsJobQueue
+  ComputeEnvironmentName:
+    Description: Name of AWS Batch Compute Environment
+    Type: String
+    Default: AnalyticsComputing
+Resources:
+  AthenaQueryEditorBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      Tags:
+      - Key: Project
+        Value:
+          Ref: ProjectName
+      - Key: Environment
+        Value:
+          Ref: EnvironmentType
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      Tags:
+      - Key: Project
+        Value:
+          Ref: ProjectName
+      - Key: Environment
+        Value:
+          Ref: EnvironmentType
+  StepFunctionLogETLEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: AnalyticsLogETLEventsQueue.fifo
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 43200
+      KmsMasterKeyId: alias/aws/sqs
+      FifoQueue: true
+      ContentBasedDeduplication: true
+  StepFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+  AnalyticsSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: GlueAnalytics
+  AnalyticsSNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn:
+        Ref: AnalyticsSNSTopic
+      Protocol: email
+      Endpoint:
+        Ref: NotifyEmail
+  StepFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - Fn::Sub: states.${AWS::Region}.amazonaws.com
+          Action: sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: StatesExecutionPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - lambda:InvokeFunction
+            - logs:*
+            - sqs:*
+            - s3:*
+            - sns:*
+            Resource: '*'
+  AnalyticsGlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: glue.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+      - arn:aws:iam::aws:policy/CloudWatchFullAccess
+  AnalyticsBatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: batch.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+      - arn:aws:iam::aws:policy/AWSLambda_FullAccess
+      - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+      - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+      - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: EcsInstanceRole
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2008-10-17
+        Statement:
+        - Sid: ''
+          Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      - arn:aws:iam::aws:policy/AWSLambda_FullAccess
+      - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+      - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+  AnalyticsJobEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ANALYTICS_JOB_EVENTS
+      SSESpecification:
+        KMSMasterKeyId: alias/aws/dynamodb
+        SSEEnabled: 'true'
+        SSEType: KMS
+      AttributeDefinitions:
+      - AttributeName: job_name
+        AttributeType: S
+      - AttributeName: timestamp
+        AttributeType: N
+      - AttributeName: event_name
+        AttributeType: S
+      KeySchema:
+      - AttributeName: job_name
+        KeyType: HASH
+      - AttributeName: timestamp
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      GlobalSecondaryIndexes:
+      - IndexName: JOB-EVENT-TYPE-index
+        KeySchema:
+        - AttributeName: job_name
+          KeyType: HASH
+        - AttributeName: event_name
+          KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        Projection:
+          ProjectionType: ALL
+  AnalyticsJobEventsCurrentTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ANALYTICS_JOB_EVENTS_CURRENT
+      SSESpecification:
+        KMSMasterKeyId: alias/aws/dynamodb
+        SSEEnabled: 'true'
+        SSEType: KMS
+      AttributeDefinitions:
+      - AttributeName: job_name
+        AttributeType: S
+      - AttributeName: event_name
+        AttributeType: S
+      KeySchema:
+      - AttributeName: job_name
+        KeyType: HASH
+      - AttributeName: event_name
+        KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+  LogETLEventsLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 60
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/3f98d1af6e594f8e9aa43f648089659e
+      FunctionName: logETLEvents
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          tableName:
+            Ref: AnalyticsJobEventsCurrentTable
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonDynamoDBFullAccess
+      - AWSStepFunctionsFullAccess
+      - AmazonSQSFullAccess
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - StepFunctionLogETLEventsQueue
+              - Arn
+            BatchSize: 1
+  HandleETLEventsLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/f9869f45eca2bd2d7522544692a6c169
+      FunctionName: handleETLEvents
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          tableName:
+            Ref: AnalyticsJobEventsTable
+          snsTopic:
+            Ref: AnalyticsSNSTopic
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonDynamoDBFullAccess
+      - AWSStepFunctionsFullAccess
+      - AmazonSQSFullAccess
+      - AmazonSNSFullAccess
+      Events:
+        DynamoDBEvent:
+          Type: DynamoDB
+          Properties:
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 1
+            Stream:
+              Fn::GetAtt:
+              - AnalyticsJobEventsCurrentTable
+              - StreamArn
+  InvokeAnalyticsCrawlerLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/b73cfcd054bcc7c7a03ec57dd1b7fbd4
+      FunctionName: invokeGlueCrawler
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          crawlerName: default-crawler
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AmazonAthenaFullAccess
+      - AWSGlueConsoleFullAccess
+      - AWSStepFunctionsFullAccess
+  CheckStatusOfAnalyticsCrawlerLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/d5cf3d18d4c236c7af75ad02f88e5858
+      FunctionName: checkStatusOfCrawler
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          crawlerName: default-crawler
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AmazonAthenaFullAccess
+      - AWSGlueConsoleFullAccess
+      - AWSStepFunctionsFullAccess
+  InvokeETLJobLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/40fc24af09468d0077a0d3374b121375
+      FunctionName: invokeGlueJob
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          glueETLJob: default-etl-job
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AmazonAthenaFullAccess
+      - AWSGlueConsoleFullAccess
+      - AWSStepFunctionsFullAccess
+  InvokeStepFunctionLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/68adafd25e65e8523ff6529db07055e8
+      FunctionName: invokeStepFunction
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          stateMachine: test
+          bucketName: test
+          key: test
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AWSStepFunctionsFullAccess
+  CsvToJsonLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/93452b177823955a1c03d878b6eac64b
+      FunctionName: csvToJson
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          sourceBucket:
+            Ref: SourceBucket
+          sourcePath: csv
+          destinationBucket:
+            Ref: SourceBucket
+          destinationPath: json
+          archivePath: archive
+          fileFilter: .csv
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AWSStepFunctionsFullAccess
+  CheckStatusOfETLJobLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 600
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/165fee7e2235cd656b0c8d18a05048a4
+      FunctionName: checkStatusOfETLJob
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          jobName: data_us_collection_raw
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AmazonAthenaFullAccess
+      - AWSGlueConsoleFullAccess
+      - AWSStepFunctionsFullAccess
+  InvokeAWSBatchLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 30
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/d7c602b476e2f90d679296e2785b738c
+      Handler: index.lambda_handler
+      FunctionName: invokeBatch
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          batchJobName: analytics-cosmosdb
+          batchJobDefination: analytics-cosmosdb
+          batchJobQueue: analytics-job-queue
+          batchJobMemory: 32000
+          batchJobCPUs: 8
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AWSBatchFullAccess
+      - AWSStepFunctionsFullAccess
+  CheckStatusOfAWSBatchLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 30
+      MemorySize: 2048
+      CodeUri: s3://myworking-bucket/8cb82f94b47e3c91f82de9c8ed3fa2ba
+      Handler: index.lambda_handler
+      FunctionName: checkStatusOfBatch
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          batchJobQueue: analytics-job-queue
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AWSBatchFullAccess
+      - AWSStepFunctionsFullAccess
+  ExcelToJsonLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 300
+      MemorySize: 3008
+      CodeUri: s3://myworking-bucket/447559433060c03a508e1815ba7bd598
+      FunctionName: excelToJson
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          archiveBucket: dcmigrationarchive
+          destinationBucket: dcmigrationdatacuration
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AWSStepFunctionsFullAccess
+  MoveS3FilesLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 300
+      MemorySize: 3008
+      CodeUri: s3://myworking-bucket/bc07210cd59263e6ea46ef9aebe0fdce
+      FunctionName: moveS3Files
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          moveFilesSrcBucket: datacuration
+          moveFilesDestBucket: archive
+          moveFilesPath: json
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AWSStepFunctionsFullAccess
+  IteratorLF:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 30
+      MemorySize: 1024
+      CodeUri: s3://myworking-bucket/89a558dbab77e30b3222b732039cba65
+      Handler: index.lambda_handler
+      FunctionName: iterator
+      Runtime: python3.7
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          keyName: order
+      Policies:
+      - AWSLambdaExecute
+      - CloudWatchLogsFullAccess
+      - AmazonS3FullAccess
+      - AmazonAthenaFullAccess
+      - AWSGlueConsoleFullAccess
+      - AWSStepFunctionsFullAccess
+Outputs:
+  IteratorLF:
+    Value:
+      Fn::GetAtt:
+      - IteratorLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-IteratorLF
+  CheckStatusOfETLJobLF:
+    Value:
+      Fn::GetAtt:
+      - CheckStatusOfETLJobLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-CheckStatusOfETLJobLF
+  CsvToJsonLF:
+    Value:
+      Fn::GetAtt:
+      - CsvToJsonLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-CsvToJsonLF
+  InvokeStepFunctionLF:
+    Value:
+      Fn::GetAtt:
+      - InvokeStepFunctionLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-InvokeStepFunctionLF
+  InvokeETLJobLF:
+    Value:
+      Fn::GetAtt:
+      - InvokeETLJobLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-InvokeETLJobLF
+  CheckStatusOfAnalyticsCrawlerLF:
+    Value:
+      Fn::GetAtt:
+      - CheckStatusOfAnalyticsCrawlerLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-CheckStatusOfAnalyticsCrawlerLF
+  InvokeAnalyticsCrawlerLF:
+    Value:
+      Fn::GetAtt:
+      - InvokeAnalyticsCrawlerLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-InvokeAnalyticsCrawlerLF
+  HandleETLEventsLF:
+    Value:
+      Fn::GetAtt:
+      - HandleETLEventsLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-HandleETLEventsLF
+  LogETLEventsLF:
+    Value:
+      Fn::GetAtt:
+      - LogETLEventsLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-LogETLEventsLF
+  AnalyticsJobEventsCurrentTable:
+    Value:
+      Ref: AnalyticsJobEventsCurrentTable
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-AnalyticsJobEventsCurrentTable
+  AnalyticsJobEventsTable:
+    Value:
+      Ref: AnalyticsJobEventsTable
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-AnalyticsJobEventsTable
+  StepFunctionExecutionRole:
+    Value:
+      Fn::GetAtt:
+      - StepFunctionExecutionRole
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-StepFunctionExecutionRole
+  AnalyticsGlueServiceRole:
+    Value:
+      Fn::GetAtt:
+      - AnalyticsGlueServiceRole
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-AnalyticsGlueServiceRole
+  AnalyticsBatchServiceRole:
+    Value:
+      Fn::GetAtt:
+      - AnalyticsBatchServiceRole
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-AnalyticsBatchServiceRole
+  EcsInstanceRole:
+    Value:
+      Fn::GetAtt:
+      - EcsInstanceRole
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-EcsInstanceRole
+  MoveS3FilesLF:
+    Value:
+      Fn::GetAtt:
+      - MoveS3FilesLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-MoveS3FilesLF
+  InvokeAWSBatchLF:
+    Value:
+      Fn::GetAtt:
+      - InvokeAWSBatchLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-InvokeAWSBatchLF
+  ExcelToJsonLF:
+    Value:
+      Fn::GetAtt:
+      - ExcelToJsonLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-ExcelToJsonLF
+  CheckStatusOfAWSBatchLF:
+    Value:
+      Fn::GetAtt:
+      - CheckStatusOfAWSBatchLF
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-CheckStatusOfAWSBatchLF
+  StepFunctionLogGroup:
+    Value:
+      Fn::GetAtt:
+      - StepFunctionLogGroup
+      - Arn
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-StepFunctionLogGroup
+  StepFunctionLogETLEventsQueue:
+    Value:
+      Ref: StepFunctionLogETLEventsQueue
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-StepFunctionLogETLEventsQueue
+  SourceBucket:
+    Value:
+      Ref: SourceBucket
+    Export:
+      Name:
+        Fn::Sub: ${ProjectName}-${EnvironmentType}-SourceBucket
+  AnalyticsSNSTopicEx:
+    Value:
+      Ref: AnalyticsSNSTopic
+    Export:
+      Name:
+        Fn::Sub: ${EnvironmentType}-AnalyticsSNSTopic
