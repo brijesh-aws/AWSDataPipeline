@@ -40,3 +40,9 @@ aws cloudformation deploy  --template-file analytics-deploy.yaml   --stack-name 
 #### Notes:
 - If we run the Crawler with only one file with single folder, it is not doing crawlering better way, instead it just creates single table with name 'json' only.
 - When we have multiple folders with files, then it is able to create tables with proper table names. It will use folder names as table names.
+
+### Want to know more in detail?
+
+Go through below medium blog for step by step instructions and detailed guide.
+
+https://medium.com/@brijesh_prajapati/data-pipeline-analytics-framework-using-aws-glue-b21e1e5e34cf
